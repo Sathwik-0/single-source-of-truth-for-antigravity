@@ -1,20 +1,25 @@
 # DOCUMENT REGISTRY
 
 ## Foundation
-00-NORTH-STAR.md - Planned
-01-FOUNDER-VISION.md - Planned
-02-PROBLEM.md - Planned
-03-PRODUCT-PRINCIPLES.md - Planned
-04-RESEARCH.md - Planned
-05-PROBLEM-VALIDATION.md - Planned
-06-ANTI-FEATURES.md - Planned
-07-V1-SCOPE.md - Planned
+- [x] 00-NORTH-STAR.md
+- [x] 01-FOUNDER-VISION.md
+- [x] 02-PROBLEM.md
+- [x] 03-PRODUCT-PRINCIPLES.md
+- [x] 04-RESEARCH.md
+- [x] 05-PROBLEM-VALIDATION.md
+- [x] 06-ANTI-FEATURES.md
+- [x] 07-V1-SCOPE.md
 
 ## Business
-08-VISION-TO-V5.md - Planned
-09-PERSONAS.md - Planned
-10-JOBS-TO-BE-DONE.md - Planned
-11-USER-JOURNEYS.md - Planned
-12-CORE-WORKFLOWS.md - Planned
-13-SUCCESS-METRICS.md - Planned
-14-MONETIZATION.md - Planned
+- [x] 08-VISION-TO-V5.md
+- [x] 09-PERSONAS.md
+- [x] 10-JOBS-TO-BE-DONE.md
+- [x] 11-USER-JOURNEYS.md
+- [x] 12-CORE-WORKFLOWS.md
+- [x] 13-SUCCESS-METRICS.md
+- [x] 14-MONETIZATION.md
+
+## Strategy
+- [x] 15-COMPETITIVE-MOAT.md
+- [x] 16-DATA-MOAT.md
+- [x] 17-GO-TO-MARKET.md
