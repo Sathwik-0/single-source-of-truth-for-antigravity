@@ -20,3 +20,6 @@ No fake buttons or placeholder integrations.
 
 ## Decision 006
 If uncertain, ask founder instead of inventing behavior.
+
+## Decision 007
+The Chronicle Constitution (documents 00–50) is fully completed and approved as the master single source of truth (SSOT) specification for all future implementation builds.

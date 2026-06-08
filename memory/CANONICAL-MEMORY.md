@@ -23,3 +23,8 @@ Perplexity + Linear + GitHub + Cursor
 ## V1 Integrations
 - GitHub
 - Slack
+
+## Status
+- Constitution: Complete (00–50)
+- Ready for implementation phase
+
