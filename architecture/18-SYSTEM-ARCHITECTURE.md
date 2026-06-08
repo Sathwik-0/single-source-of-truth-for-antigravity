@@ -1,64 +1,60 @@
 # System Architecture
 
-This document describes the global architecture, data flow, component boundaries, and runtime stack of Chronicle. 
+This document defines the global architecture, data flow, and runtime components of Chronicle. It explains exactly what happens from the moment a user asks a question to the moment an answer is returned.
 
 ---
 
-## 1. Global Topology
+## 1. The Request Lifecycle (User Asks Question)
 
-Chronicle is built as a modular system that bridges asynchronous ingestion pipelines with a real-time, evidence-based query engine.
+When a developer inputs a query into the keyboard-driven Chronicle UI, it flows through the system in this sequence:
 
 ```text
-                  [ External Sources: GitHub & Slack Webhooks ]
-                                       ↓
-                               [ Ingestion Engine ]
-                                       ↓
-                               [ Supabase Stack ]
-                  ┌────────────────────┴────────────────────┐
-                  ▼                                         ▼
-            [ Postgres DB ]                         [ pgvector Storage ]
-            * Causal Graph                          * Context Embeddings (3072d)
-            * Timelines & Events                    * Raw Semantic Text
-                  ▲                                         ▲
-                  └────────────────────┬────────────────────┘
-                                       ▼
-                              [ Query Processor ]
-                        ┌──────────────┴──────────────┐
-                        ▼                             ▼
-               [ Question Planner ]          [ Evidence Ranking ]
-                        │                             │
-                        ▼                             ▼
-                 [ Gemini Flash ]               [ Gemini Pro ]
-                   (Low-latency)                (Deep Reasoning)
-                        └──────────────┬──────────────┘
-                                       ▼
-                            [ Keyboard-Driven UI ]
-                             (Perplexity-like)
+       [ User Question ]
+               │
+               ▼
+      [ Question Planner ] (1. Deconstructs intent; decides engines to run/integrations to query)
+               │
+               ▼
+       [ Ingestion/RAG ] (2. Dynamically retrieves raw logs, commits, threads, and text)
+               │
+               ▼
+      [ Timeline Engine ] (3. Aligns events on a temporal, multi-dimensional axis)
+               │
+               ▼
+       [ Graph Engine ] (4. Maps relationships to build a causal understanding of the timeline)
+               │
+               ▼
+      [ Evidence Ranking ] (5. Filters and scores context, presenting only high-confidence facts)
+               │
+               ▼
+      [ Context Compressor ] (6. Compresses the ranked events to the 5 absolute key facts)
+               │
+               ▼
+       [ Gemini / Groq ] (7. Synthesizes the final answer using primary reasoning models)
+               │
+               ▼
+       [ Verified Answer ] (8. Streams results to the UI with side-by-side citations)
 ```
 
 ---
 
-## 2. Ingestion & Event Pipeline
-* **Event Ingestion:** Webhooks capture commits, PR activities, code diffs from GitHub, and channel posts, threads, reactions from Slack.
-* **Normalization Service:** Normalizes disparate raw payloads (e.g., a GitHub commit JSON and a Slack message JSON) into a standard **Event Primitive** (schema defined in `21-TIMELINE-ENGINE.md`).
-* **Graph Builder:** Takes the normalized event, extracts entities, and writes nodes and edges to the relational **Causal Graph** (schema defined in `20-GRAPH-ENGINE.md`).
-* **Embedding Service:** Generates a 3072-dimensional vector embedding of the event payload using the Gemini Embedding API and stores it in `chronicle.embeddings`.
+## 2. Core Components
+
+* **Frontend:** Keyboard-first, command-driven interface (Perplexity + Linear + GitHub + Cursor feel) designed for sub-100ms rendering.
+* **API Gateway:** Routes incoming search queries, manages real-time socket connections for streaming, and validates user authentication.
+* **Question Planner:** The coordinator model (routed via **Groq** for speed) that identifies the query intent and decides which data sources to query.
+* **Agent Runtime:** Spawns specialized agents (Research, Timeline, Graph, Evidence, Summarization) to collaborate on multi-step context retrieval.
+* **Memory Engine:** Translates raw event history into short-term, long-term, workspace, and conversation memories.
+* **Timeline Engine:** Orders all files, logs, commits, messages, and incidents by time to enable historical reconstruction.
+* **Graph Engine:** Constructs the Causal Graph, connecting entities (People, Code, Issues) to trace why events happened.
+* **Evidence Ranking:** Chronicle’s trust layer, ensuring the AI model only sees highly ranked, scored facts rather than raw database dumps.
+* **Supabase Database:** Relational and vector storage, holding the Causal Graph, timelines, logs, and metadata.
 
 ---
 
-## 3. Query & Synthesis Pipeline
-When a developer enters a natural language question in the UI:
-1. **Question Planning:** The [Question Planner](file:///C:/Users/ADMIN/.gemini/antigravity/scratch/single-source-of-truth-for-antigravity/architecture/23-QUESTION-PLANNER.md) parses the query, plans the retrieval steps, and determines which databases, code symbols, or time ranges must be queried.
-2. **Context Retrieval:** Queries the relational database (for timelines and causal graphs) and the vector database (for semantic concepts).
-3. **Evidence Ranking:** The [Evidence Ranking Engine](file:///C:/Users/ADMIN/.gemini/antigravity/scratch/single-source-of-truth-for-antigravity/architecture/25-EVIDENCE-RANKING.md) scores all retrieved context chunks by recency, authority, and connectivity, pruning low-scoring noise.
-4. **Context Compression:** The [Context Compression Engine](file:///C:/Users/ADMIN/.gemini/antigravity/scratch/single-source-of-truth-for-antigravity/architecture/26-CONTEXT-COMPRESSION.md) fits the ranked facts into the LLM context window using code truncation and chat noise filtering.
-5. **Synthesis & Citation:** Gemini 2.5 Pro synthesizes the final response, strictly bounding its answer to the cited evidence (enforced by the [Hallucination Prevention Engine](file:///C:/Users/ADMIN/.gemini/antigravity/scratch/single-source-of-truth-for-antigravity/architecture/27-HALLUCINATION-PREVENTION.md)).
-6. **Streaming Delivery:** The response is streamed to the UI via Server-Sent Events (SSE) along with side-by-side clickable citations.
+## 3. Technology Stack
 
----
-
-## 4. Runtime Stack
-* **Database & Hosting:** Supabase (Postgres, pgvector, Edge Functions, Auth).
-* **AI Engine:** Google Gemini API (Gemini 2.5 Pro for deep reasoning, Gemini 2.5 Flash for indexing/tagging, Groq for low-latency routing).
-* **Application Services:** Node.js/TypeScript backend service deployed as serverless functions.
-* **Frontend:** Next.js/React with Vanilla CSS, optimized for sub-100ms keyboard-driven navigation.
+* **Primary Reasoning:** Gemini 2.5 Pro (long-context reasoning, synthesis, deep code analysis).
+* **Fast Operations:** Gemini 2.5 Flash (indexing, entity extraction, planning).
+* **Router Layer:** Groq (low-latency routing, fast planning, streaming token delivery).
+* **Persistence & Vector Search:** Supabase / PostgreSQL (utilizing pgvector for 3072d Gemini Embeddings, RLS for workspace isolation, and table partitioning).

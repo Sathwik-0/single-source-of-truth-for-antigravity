@@ -1,80 +1,86 @@
 # Graph Engine
 
-This document details the design, schema, and traversal patterns of the Causal Graph Engine. The Graph Engine maps semantic relationships between developers, commits, slack discussions, tickets, and code symbols.
+This document defines the schema, nodes, edges, and causal reasoning mechanisms of Chronicle's Graph Engine. The Graph Engine structures the connections between engineering actions and conversations to enable causal reconstruction of code history.
 
 ---
 
-## 1. Node Schema
+## 1. Graph Node Schema
 
-The Causal Graph represents engineering entities as distinct nodes. The primary node types are:
+Chronicle's Causal Graph is composed of eight core Node Types:
 
 ```text
-  [User]          -> An engineer (Github username, Slack ID, email).
-  [Commit]        -> A Git commit (hash, author, date, message).
-  [PullRequest]   -> A GitHub PR (number, title, author, state, diff).
-  [SlackChannel]  -> A public Slack channel (id, name).
-  [SlackMessage]  -> A specific Slack post/thread (id, text, timestamp).
-  [CodeSymbol]    -> A package, class, function, or database schema (name, path, scope).
-  [Incident]      -> A production alert or post-mortem (id, description, status).
+  [People]        -> Individual developers (GitHub username, Slack ID, emails).
+  [Repositories]  -> Codebase repositories containing files and revision history.
+  [Commits]       -> Git revisions (hashes, logs, authorship, file diff boundaries).
+  [PullRequests]  -> GitHub pull requests containing reviews, approvals, and threads.
+  [Issues]        -> Task tracking records (GitHub issues, Linear/Jira tasks).
+  [Incidents]     -> Telemetry alerts, error events, outage periods, and post-mortems.
+  [Decisions]     -> Approved architectural choices, RFCs, and decision log nodes.
+  [Questions]     -> Logs of developer queries to map user context.
 ```
 
 ---
 
-## 2. Edge Schema (Relationships)
+## 2. Graph Edge Schema (Relationships)
 
-Edges connect nodes to represent the causal links of development history. Key relationship types include:
+Edges connect nodes to represent logical and semantic causality:
 
-* **AUTHORED:** `User` → `Commit` / `PullRequest` / `SlackMessage`
-* **DISCUSSED_IN:** `SlackMessage` → `SlackChannel`
-* **MODIFIED:** `Commit` → `CodeSymbol`
-* **DEPICTS:** `SlackMessage` → `CodeSymbol` / `Incident` (e.g., discussing a function or an outage)
-* **RESOLVES:** `Commit` / `PullRequest` → `Incident`
-* **REFS:** `SlackMessage` → `Commit` / `PullRequest` (e.g., pasting a commit link in Slack)
+* **AUTHORED:** `People` → `Commits` / `PullRequests` / `SlackMessage` / `Questions` (traces direct creation).
+* **REVIEWED:** `People` → `PullRequests` (identifies domain experts and approvals).
+* **REFERENCES:** `SlackMessage` / `Decisions` / `Commits` → any node (e.g., a commit message referencing a PR, a Slack link to a code file, or a Decision citing a benchmark).
+* **CAUSED:** `Commits` / `Decisions` → `Incidents` (maps what change broke the system).
+* **FIXED:** `Commits` / `PullRequests` → `Incidents` / `Issues` (traces mitigation history).
+* **DISCUSSED:** `People` / `SlackMessage` → `Decisions` / `Incidents` (maps the debate, rationale, and context surrounding an action).
 
 ---
 
-## 3. Storage Strategy
+## 3. Relational Storage Schema
 
-To ensure standard SQL compatibility and optimal Supabase query performance, the Causal Graph is implemented using relational tables with foreign key constraints.
+To ensure scalability and fast query latency, nodes and edges are stored using indexing patterns in Postgres:
 
 ```sql
-create table chronicle.nodes (
+create table chronicle.graph_nodes (
     id uuid primary key default gen_random_uuid(),
-    node_type text not null, -- 'user', 'commit', 'slack_message', 'symbol'
-    external_id text unique not null, -- e.g., 'sha-a3f89e', 'slack-1283921.22'
+    organization_id uuid not null,
+    node_label text not null, -- 'people', 'repositories', 'commits', 'pr', 'issue', 'incident', 'decision'
+    external_key text unique not null, -- e.g., 'git-sha-7235e4f', 'slack-msg-1283921'
     properties jsonb default '{}'::jsonb,
     created_at timestamptz default now()
 );
 
-create table chronicle.edges (
+create table chronicle.graph_edges (
     id uuid primary key default gen_random_uuid(),
-    source_id uuid references chronicle.nodes(id) on delete cascade,
-    target_id uuid references chronicle.nodes(id) on delete cascade,
-    relation_type text not null, -- 'authored', 'modified', 'refs'
+    organization_id uuid not null,
+    source_id uuid references chronicle.graph_nodes(id) on delete cascade,
+    target_id uuid references chronicle.graph_nodes(id) on delete cascade,
+    relation_type text not null, -- 'authored', 'reviewed', 'references', 'caused', 'fixed', 'discussed'
     properties jsonb default '{}'::jsonb,
     created_at timestamptz default now(),
     unique (source_id, target_id, relation_type)
 );
 
-create index on chronicle.edges (source_id);
-create index on chronicle.edges (target_id);
-create index on chronicle.edges (relation_type);
+create index on chronicle.graph_edges (source_id);
+create index on chronicle.graph_edges (target_id);
+create index on chronicle.graph_edges (relation_type);
 ```
 
 ---
 
-## 4. Traversal Logic (Causal Path Reconstruction)
+## 4. Causal Path Reconstruction (Traversal)
 
-The query engine uses breadth-first search (BFS) or depth-limited search (DLS) over the relational edge index to reconstruct how code changes relate to discussions:
+The Graph Engine reconstructs *causality* by executing path-traversal queries. When an incident is analyzed, the engine runs recursive queries (max 4 depth levels) to bridge telemetry changes with human intent:
 
 ```text
-    [CodeSymbol]
-          ↑ (modified in)
-       [Commit]
-          ↑ (associated with)
-     [PullRequest]
-          ↑ (referenced in)
-    [SlackMessage]  <-- This thread contains the debate/rationale!
+    [Incident: PaymentGatewayTimeout]
+                   ▲
+                   │ (CAUSED by)
+               [Commit: a3f89e (timeout config)]
+                   ▲
+                   │ (AUTHORED by)
+               [People: @sathwik]
+                   ▲
+                   │ (DISCUSSED in)
+          [SlackMessage: thread discussing DB congestion]
 ```
 
-By traversing this path (limit: 4 hops), Chronicle retrieves the exact conversation that explains why the `CodeSymbol` exists, even if the git history contains no descriptive commit messages.
+This causal trail is processed by the [Evidence Ranking Engine](file:///C:/Users/ADMIN/.gemini/antigravity/scratch/single-source-of-truth-for-antigravity/architecture/25-EVIDENCE-RANKING.md) to generate the structural citations for the final answer.

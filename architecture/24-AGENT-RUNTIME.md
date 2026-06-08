@@ -1,50 +1,57 @@
 # Agent Runtime
 
-This document describes the design, execution loop, sandboxing, and capabilities of the Chronicle Agent Runtime. The Agent Runtime executes complex, multi-step queries that require autonomous code reading or schema analysis.
+This document describes the design, roles, and collaboration patterns of the Chronicle Agent Runtime. The Agent Runtime coordinates specialized AI agents to solve complex query tasks.
 
 ---
 
-## 1. The Autonomous Agent Loop
+## 1. Agent Inventory
 
-For queries that cannot be solved by single-step database retrieval, the system instantiates an ephemeral Agent Loop:
+The runtime coordinates five specialized agents, each holding a narrow set of tools and responsibilities:
 
 ```text
-               [ Start Agent Runtime ]
-                         │
-                         ▼
-                     [ Plan ] (Gemini 2.5 Pro sets sub-goals)
-                         │
-                         ▼
-                     [ Action ] (Invokes sandbox tools: Git, DB, Web)
-                         │
-                         ▼
-                   [ Observation ] (Parses execution stdout/errors)
-                         │
-                         ▼
-               { Goal Achieved? } ──[ No ]──► [ Refine Plan ] ──┐
-                         │                                      │
-                       [ Yes ]                                  │
-                         ▼                                      │
-             [ Synthesize Response ] ◄──────────────────────────┘
+  ┌───────────────────┐     ┌───────────────────┐     ┌───────────────────┐
+  │  Timeline Agent   │     │    Graph Agent    │     │  Research Agent   │
+  ├───────────────────┤     ├───────────────────┤     ├───────────────────┤
+  │ Indexes, clusters,│     │ Traces causality  │     │ Performs code     │
+  │ & sequences events│     │ across entities   │     │ reading and AST   │
+  │ chronologically   │     │ and tools         │     │ analysis          │
+  └─────────┬─────────┘     └─────────┬─────────┘     └─────────┬─────────┘
+            │                         │                         │
+            └─────────────────────────┼─────────────────────────┘
+                                      ▼
+                            ┌───────────────────┐
+                            │  Evidence Agent   │
+                            ├───────────────────┤
+                            │ Filters, scores & │
+                            │ validates facts   │
+                            └─────────┬─────────┘
+                                      │
+                                      ▼
+                            ┌───────────────────┐
+                            │Summarization Agent│
+                            ├───────────────────┤
+                            │ Synthesizes the   │
+                            │ final response    │
+                            └───────────────────┘
 ```
 
----
-
-## 2. Sandbox Security & Isolation
-
-Executing developer-like scripts (e.g., parsing a complex Python configuration or analyzing SQL schemas) requires strict safety constraints:
-
-* **Ephemeral Containers:** All code-execution analysis runs inside isolated, secure, read-only Docker containers with memory limits (max 256MB).
-* **Network Isolation:** Sandbox containers have no access to the external internet, preventing data exfiltration.
-* **Timeout Limits:** Actions are hard-capped at 5 seconds of execution time to prevent infinite loops or denial-of-service attempts.
+* **Research Agent:** Inspects code repositories, analyzes file structures, and parses code syntax trees to locate specific changes.
+* **Timeline Agent:** Gathers temporal events from various integrations, handles sequence clustering, and aligns events chronologically.
+* **Graph Agent:** Traverses the Causal Graph, identifying connections between commits, users, Slack channels, and decisions.
+* **Evidence Agent:** Evaluates and scores context using the [Evidence Ranking Engine](file:///C:/Users/ADMIN/.gemini/antigravity/scratch/single-source-of-truth-for-antigravity/architecture/25-EVIDENCE-RANKING.md), verifying the validity of citations.
+* **Summarization Agent:** Takes the highly compressed, ranked facts and drafts the final answer, ensuring strict grounding.
 
 ---
 
-## 3. Runtime Tool Capabilities
+## 2. Collaboration Protocol
 
-The Agent Runtime is equipped with a restricted set of read-only tools:
+When a multi-step query is processed (e.g., *"Why did the deployment fail, and what was discussed in Slack about it?"*), the agents collaborate through a structured pipeline:
 
-* **read_repository_file:** Reads file contents from the checked-out repository.
-* **list_code_directory:** Lists the files and directories inside the repository.
-* **inspect_database_schema:** Reads table structures, columns, and indexes of the Supabase project database.
-* **match_causal_path:** Traces paths in the Causal Graph between code nodes and chat nodes.
+1. **Task Delegation:** The Question Planner instantiates the runtime and delegates sub-tasks to the agents.
+2. **Parallel Retrieval:**
+   * The **Timeline Agent** aggregates all events around the deployment timestamp.
+   * The **Research Agent** analyzes the codebase diff of the failed deployment.
+   * The **Graph Agent** finds Slack threads linked to the developer who triggered the deployment.
+3. **Consolidation:** The agents send their retrieved facts to the **Evidence Agent**, which filters out irrelevant information and assigns authority scores.
+4. **Final Synthesis:** The **Summarization Agent** receives the ranked evidence, resolves any conflicts, and streams the grounded answer back to the user.
+5. **Session Teardown:** The ephemeral container environments are destroyed, preserving only the session context.

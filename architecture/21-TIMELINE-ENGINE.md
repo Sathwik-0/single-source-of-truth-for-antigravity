@@ -1,53 +1,54 @@
 # Timeline Engine
 
-This document defines the architecture, event schema, and zoom logic for the Chronicle Timeline Engine. The Timeline Engine establishes time as the primary organizing axis for software development events.
+This document outlines the design, event model, and chronological alignment processes of Chronicle's Timeline Engine. The Timeline Engine turns every activity across tools into a standardized event, allowing developers to reconstruct code history.
 
 ---
 
-## 1. Event Primitive Schema
+## 1. The Unified Event Primitive
 
-Every ingestion source (GitHub webhooks, Slack messages, deployment logs) yields events that are mapped to a unified **Event Primitive**:
+The Timeline Engine treats every piece of data as a temporal event. The core primitive maps events to a common format:
 
 ```sql
-create table chronicle.events (
-    id uuid primary key default gen_random_uuid(),
+create table chronicle.timeline_events (
+    id uuid default gen_random_uuid(),
     event_timestamp timestamptz not null,
-    event_type text not null,       -- 'commit', 'pr_approve', 'slack_post', 'deploy', 'alert'
-    actor_id uuid not null,         -- references user node
-    description text not null,      -- short human-readable summary
-    metadata jsonb default '{}',    -- original source payload details (e.g. diff size, message length)
-    source_id text not null,        -- external identifier (e.g., commit SHA or Slack timestamp)
-    created_at timestamptz default now()
-);
-
-create index on chronicle.events (event_timestamp desc);
-create index on chronicle.events (event_type);
+    event_type text not null,       -- 'commit', 'pr', 'issue', 'slack_message', 'incident', 'deploy'
+    organization_id uuid not null,
+    actor_id uuid references chronicle.users(id),
+    title text not null,            -- e.g., "PR #14 Approved", "Alert: PaymentTimeout"
+    body text,                      -- raw text or description
+    source_url text,                -- link to the source tool
+    metadata jsonb default '{}',    -- raw tool payloads (diff sizes, tags, statuses)
+    primary key (id, event_timestamp)
+) partition by range (event_timestamp);
 ```
 
 ---
 
-## 2. Multi-Dimensional Timeline Alignment
+## 2. Event Normalization
 
-The Timeline Engine acts as a time-series database. It aligns activities across different systems by partitioning them into hourly or daily buckets:
+As webhooks trigger, disparate data payloads are immediately transformed into event primitives:
+
+* **Commit Event:** Maps a Git commit (SHA, timestamp, file diffs, author details) to a `commit` event.
+* **PR Event:** Maps a Pull Request lifecycle event (opened, reviewed, approved, merged) to a `pr` event.
+* **Issue Event:** Maps task changes (created, moved, closed) in GitHub Issues, Linear, or Jira to an `issue` event.
+* **Slack Message Event:** Maps conversations, replies, and reactions to a `slack_message` event.
+* **Incident Event:** Maps alerts from Sentry, Datadog, or manual logs to an `incident` event.
+* **Deployment Event:** Maps CI/CD run milestones to a `deploy` event.
+
+---
+
+## 3. Chronological Reconstruction Flow
+
+When a developer asks *"What happened during the database outage last Tuesday?"*, the Timeline Engine runs a chronological query over the target time window:
 
 ```text
-    Time Axis   ──► [10:00 AM] ──► [10:15 AM] ──► [10:30 AM] ──► [10:45 AM]
-    Slack       ──► #deploy msg      ──►                  ──► #incident thread
-    GitHub      ──►                  ──► Commit a3f89e    ──►
-    Telemetry   ──►                  ──►                  ──► Alert: Timeout
+  [Tuesday 10:00 AM] ──► Event: deploy          (Build #204 deployed)
+  [Tuesday 10:05 AM] ──► Event: incident        (Alert: DB Connection Timeout spikes)
+  [Tuesday 10:06 AM] ──► Event: slack_message   (@sathwik: "Did we change DB credentials?")
+  [Tuesday 10:10 AM] ──► Event: slack_message   (@manager: "Reverting build #204")
+  [Tuesday 10:15 AM] ──► Event: deploy          (Revert deploy successful)
+  [Tuesday 10:18 AM] ──► Event: incident        (DB Connection Timeout resolved)
 ```
 
-When an incident query is processed, the engine isolates the relevant window (e.g. `[10:00 AM - 10:45 AM]`), overlaying chat events, code changes, and alerts to show their temporal proximity.
-
----
-
-## 3. Aggregation & Zooming Logic
-
-To prevent UI performance degradation and message overload when viewing long time ranges (e.g., three months), the Timeline Engine applies **Semantic Time Windowing**:
-
-* **Micro-zoom:** Individual events (e.g., every single Slack comment or Git file modification) are shown in detail.
-* **Macro-zoom:** Events are collapsed into logical clusters using temporal proximity and entity clustering:
-  * 15 commits to repository `payment-service` within 1 hour are represented as: *"15 commits by Sathwik to payment-service"* (Click to expand).
-  * Multiple alerts and resolution posts within a 30-minute block are grouped as: *"Incident PaymentGatewayTimeout (Mitigated)"*.
-
-The zoom level is dynamically calculated in the API based on the viewport parameters requested by the keyboard-driven UI, ensuring response payloads remain small and fast to parse.
+By ordering these events by time, Chronicle reconstructs the timeline of an incident or decision. The UI renders this as a dense, keyboard-navigable timeline, allowing developers to step forward and backward through history.
